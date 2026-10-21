@@ -82,6 +82,9 @@ revalida a sessão e o papel atual no PostgreSQL.
 Logout exclui a sessão do servidor e remove o cookie. Login rotaciona o cookie
 anterior. Mudança de papel ou ativação revoga as sessões do membro afetado.
 Sessões expiram após 8 horas por padrão, configuráveis por ambiente.
+A resolução usa SELECT sem lock de linha. Requisições já autenticadas podem
+terminar com o papel anterior a uma revogação; a próxima requisição após o commit
+é negada. Locks exclusivos continuam nas alterações de membros, não nas leituras.
 
 ## 6. CSRF, abuso e falhas
 
@@ -100,10 +103,17 @@ request.client.host identifica o cliente real visto pelo Nginx, e não o contain
 Nginx compartilhado por todos. Headers enviados diretamente à API por outros
 peers são ignorados. Não se usa confiança global (*). Clientes sob um mesmo NAT
 ainda compartilham o bucket; CDN/balanceador adicional requer configuração própria.
+O limite de 10 tentativas por conta/minuto admite bloqueio direcionado: um atacante
+pode esgotar continuamente o bucket de um tenant/email conhecido. Isso não revoga
+sessões existentes. O ADR 0019 registra o risco aceito no M1 e a evolução futura
+para backoff e dispositivo previamente validado; essas mitigações não estão prontas.
 
 Erros de validação não refletem o valor enviado, protegendo senhas nas respostas.
 Conflitos retornam 409, ausência de sessão 401, falta de permissão 403, recurso
 inacessível 404 e indisponibilidade 503. Um limite excedido retorna 429 com Retry-After.
+O adaptador HTTP busca o status pela hierarquia de classes do erro, preservando
+o status de subclasses. Erros de aplicação sem mapeamento retornam 500 genérico,
+sem expor detalhes internos nem gerar KeyError dentro do handler.
 
 ## 7. RBAC: autenticação não é autorização
 
@@ -129,6 +139,16 @@ A validação aceita apenas HTTP(S), rejeita credenciais em URL, fragments, host
 locais, IPs privados/reservados e formas ambíguas de endereço. Não há requisição
 HTTP ao destino neste marco. DNS rebinding e redirects precisam ser tratados no
 worker antes de qualquer execução real no M2/M3.
+
+MonitorConfig.create aplica validação e normalização a entradas novas/alteradas.
+O construtor simples representa um snapshot persistido: o repositório reconstitui
+os valores sem executar a política atual de entrada. Assim, uma regra futura não
+impede listar ou abrir registros antigos para correção. Uma edição continua
+precisando atender à política atual. Novos chamadores (por exemplo, importação)
+devem usar a factory para entrada, não o construtor de hidratação.
+Não houve afrouxamento de constraints nem migração de dados nesta alteração.
+Quando uma regra mudar, planejar migração/estado explícito de configuração inválida
+e impedir execução insegura no worker; conseguir ler um registro não autoriza executá-lo.
 
 Listagens são paginadas (20 por padrão, máximo 100). Alterações e remoções exigem
 `config_version`. A atualização bloqueia a linha, compara a versão recebida e

@@ -1,6 +1,7 @@
 import ipaddress
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Self
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID
 
@@ -58,6 +59,8 @@ def validate_url(value: str) -> str:
 
 @dataclass(frozen=True)
 class MonitorConfig:
+    """Stored configuration snapshot. Use create() to validate new input."""
+
     name: str
     url: str
     interval_seconds: int = 60
@@ -65,17 +68,33 @@ class MonitorConfig:
     expected_status: int = 200
     is_active: bool = True
 
-    def __post_init__(self) -> None:
-        if not self.name.strip() or len(self.name) > 100:
+    @classmethod
+    def create(
+        cls,
+        name: str,
+        url: str,
+        interval_seconds: int = 60,
+        timeout_seconds: int = 10,
+        expected_status: int = 200,
+        is_active: bool = True,
+    ) -> Self:
+        """Apply today's input policy without applying it to historical database rows."""
+        if not name.strip() or len(name) > 100:
             raise ValueError("Name must contain 1 to 100 characters.")
-        if not 30 <= self.interval_seconds <= 86400 or not 1 <= self.timeout_seconds <= 30:
+        if not 30 <= interval_seconds <= 86400 or not 1 <= timeout_seconds <= 30:
             raise ValueError("Invalid interval or timeout.")
-        if self.timeout_seconds >= self.interval_seconds:
+        if timeout_seconds >= interval_seconds:
             raise ValueError("Timeout must be shorter than the interval.")
-        if not 100 <= self.expected_status <= 599:
+        if not 100 <= expected_status <= 599:
             raise ValueError("Invalid expected HTTP status.")
-        object.__setattr__(self, "name", self.name.strip())
-        object.__setattr__(self, "url", validate_url(self.url))
+        return cls(
+            name.strip(),
+            validate_url(url),
+            interval_seconds,
+            timeout_seconds,
+            expected_status,
+            is_active,
+        )
 
 
 @dataclass(frozen=True)

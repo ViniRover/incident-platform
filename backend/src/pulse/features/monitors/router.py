@@ -29,7 +29,7 @@ class MonitorInput(BaseModel):
         return self
 
     def to_config(self) -> MonitorConfig:
-        return MonitorConfig(**self.model_dump(exclude={"config_version"}))
+        return MonitorConfig.create(**self.model_dump(exclude={"config_version"}))
 
 
 class MonitorUpdate(MonitorInput):

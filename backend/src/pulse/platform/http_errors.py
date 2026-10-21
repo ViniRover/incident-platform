@@ -36,9 +36,10 @@ def install_error_handlers(app: FastAPI) -> None:
         headers = {"Cache-Control": "no-store"}
         if isinstance(error, RateLimited):
             headers["Retry-After"] = "60"
-        return JSONResponse(
-            {"detail": str(error)}, status_code=statuses[type(error)], headers=headers
-        )
+        # Preserve domain/presentation separation and inherit the nearest mapped status.
+        status = next((statuses[base] for base in type(error).__mro__ if base in statuses), 500)
+        detail = str(error) if status != 500 else "Internal server error."
+        return JSONResponse({"detail": detail}, status_code=status, headers=headers)
 
     @app.exception_handler(IntegrityError)
     async def integrity_error(request: Request, error: IntegrityError):

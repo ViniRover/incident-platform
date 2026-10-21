@@ -77,7 +77,6 @@ class SqlIdentityRepository:
                 SessionRow.expires_at > datetime.now(UTC),
                 UserRow.is_active.is_(True),
             )
-            .with_for_update(read=True, of=UserRow)
             .execution_options(populate_existing=True)
         ).first()
         if result is None:

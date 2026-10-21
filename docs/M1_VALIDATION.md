@@ -200,3 +200,39 @@ permanecem pendentes. O finding #2 deve ser resolvido antes do M2.
 Localmente, a sequência de build/up com COMPOSE_FILE preservou as publicações
 127.0.0.1:5432 e 127.0.0.1:6379. Os sete testes de integração, incluindo a regressão
 de proxy, passaram em seguida com essa mesma composição. Volumes foram preservados.
+
+## Revisão dos findings #2 a #5
+
+Alterações implementadas após o commit a296a84:
+
+- #2: MonitorConfig.create valida/normaliza entrada nova ou editada. O repositório
+  reconstitui snapshots sem executar a política atual. Não foram alteradas regras
+  atuais de URL/intervalo, constraints, schema ou dados existentes.
+- #3: resolução da sessão usa SELECT sem FOR SHARE; locks exclusivos de alteração
+  de membro e monitor foram mantidos. A janela de requisições já autenticadas está
+  explicitamente aceita nos ADRs 0002/0019.
+- #4: o handler HTTP resolve o status pela MRO da exceção. Subclasses herdam o
+  status e Retry-After quando aplicável; erros sem mapeamento recebem 500 sanitizado.
+- #5: ADR 0019 descreve bloqueio direcionado por tenant/email e a mitigação futura
+  por backoff/dispositivo validado. O risco foi documentado, não eliminado.
+
+Evidências locais:
+
+- 71 testes rápidos passaram, com cobertura de 97,77%; Ruff/formatação passaram.
+- O teste HTTP cria monitor em service.corp, simula uma futura regra bloqueando
+  esse domínio e confirma listagem/detalhe 200, novas entradas/edições inválidas
+  422 e correção da URL para um destino permitido com versão incrementada.
+- Testes de domínio verificam validação/normalização na factory e preservação de
+  valores históricos no snapshot, inclusive limites numéricos hoje não permitidos.
+- Seis casos de subclasses em dois níveis retornam os códigos esperados; um erro
+  sem mapeamento retorna resposta genérica sem expor detalhes internos.
+- Oito testes de integração passaram contra PostgreSQL/Redis reais, incluindo
+  a regressão de proxy e a resolução de sessão em transação READ ONLY. Enquanto
+  essa leitura fica aberta, outra conexão altera o usuário e revoga a sessão com
+  lock_timeout de 500 ms; a próxima resolução é negada e a API retorna 401.
+
+O teste de revogação usa diretamente o repositório para isolar persistência e
+concorrência; não cria uma exceção às regras de alteração de owner na API.
+Todos os dados de teste são removidos por tenant. Não houve migração destrutiva.
+Testes locais não substituem o CI do novo commit. A mitigação completa de #5 e o
+tratamento operacional de configurações que se tornarem inválidas continuam futuros.

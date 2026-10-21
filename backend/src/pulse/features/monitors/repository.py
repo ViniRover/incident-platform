@@ -10,6 +10,7 @@ from pulse.platform.errors import Conflict, NotFound
 
 
 def _monitor(row: MonitorRow) -> Monitor:
+    # Hydrate the stored snapshot unchanged; evolving input policies belong to create().
     config = MonitorConfig(
         row.name,
         row.url,

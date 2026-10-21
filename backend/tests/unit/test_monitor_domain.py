@@ -46,4 +46,19 @@ def test_rejects_non_public_or_ambiguous_targets(url):
 )
 def test_configuration_enforces_domain_invariants(changes):
     with pytest.raises(ValueError):
-        MonitorConfig(**{"name": "A", "url": "https://example.com", **changes})
+        MonitorConfig.create(**{"name": "A", "url": "https://example.com", **changes})
+
+
+def test_create_normalizes_new_input_but_hydration_preserves_stored_values():
+    config = MonitorConfig.create("  Name  ", "https://EXAMPLE.com")
+    assert config.name == "Name"
+    assert config.url == "https://example.com/"
+    stored = MonitorConfig("  Historical name  ", "https://EXAMPLE.com", timeout_seconds=45)
+    assert stored.name == "  Historical name  "
+    assert stored.url == "https://EXAMPLE.com"
+    assert stored.timeout_seconds == 45
+
+
+def test_create_still_rejects_unsafe_urls():
+    with pytest.raises(ValueError):
+        MonitorConfig.create("Unsafe", "http://127.0.0.1/")

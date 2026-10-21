@@ -253,6 +253,14 @@ These supporting documents are currently written in Portuguese.
 - Member-role changes revoke the target user's sessions. Ownership transfer and
   automatic removal of expired sessions are deferred. Offset pagination does not
   provide a stable snapshot during concurrent edits.
+- Session reads take no row locks. Requests already authorized may finish with
+  their previous role; subsequent requests after revocation commits are denied.
+- The per-account login limit can be deliberately exhausted to deny new logins to
+  a known tenant/email. This accepted M1 limitation and future mitigations are
+  documented in ADR 0019; trusted-device/backoff mitigations are not implemented.
+- Stored monitor configurations remain readable when input policies evolve.
+  Future rule changes need an explicit migration/invalid-state plan and worker-side
+  safety checks; loading a historical configuration does not authorize its execution.
 - PostgreSQL connections use libpq TCP timeouts and keepalives in addition to
   connection and statement timeouts. Socket option support depends on the OS.
   These protect against lost TCP traffic; they are not an overall readiness deadline

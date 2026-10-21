@@ -6,11 +6,13 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 from redis import Redis
-from sqlalchemy import create_engine, delete
+from sqlalchemy import create_engine, delete, text
 from sqlalchemy.orm import Session
 
+from pulse.features.identity.domain import Role
 from pulse.features.identity.models import SessionRow, TenantRow, UserRow
 from pulse.features.identity.rate_limit import RedisRateLimiter
+from pulse.features.identity.repository import SqlIdentityRepository
 from pulse.features.identity.security import token_digest
 from pulse.features.monitors.domain import MonitorConfig
 from pulse.features.monitors.models import MonitorRow
@@ -50,7 +52,7 @@ def test_real_request_transaction_and_logout():
                             tenant_id,
                             monitor_id,
                             1,
-                            MonitorConfig("Concurrent edit", "https://example.com/"),
+                            MonitorConfig.create("Concurrent edit", "https://example.com/"),
                         )
                     return "updated"
                 except Conflict:
@@ -71,14 +73,14 @@ def test_real_request_transaction_and_logout():
                         tenant_id,
                         monitor_id,
                         2,
-                        MonitorConfig("New version", "https://example.com/"),
+                        MonitorConfig.create("New version", "https://example.com/"),
                     )
                 with pytest.raises(Conflict):
                     SqlMonitorRepository(cached).update(
                         tenant_id,
                         monitor_id,
                         2,
-                        MonitorConfig("Stale cached edit", "https://example.com/"),
+                        MonitorConfig.create("Stale cached edit", "https://example.com/"),
                     )
             assert client.post("/api/v1/auth/logout", headers=headers(owner)).status_code == 204
             assert client.get("/api/v1/monitors").status_code == 401
@@ -104,3 +106,46 @@ def test_real_redis_rate_limit_is_atomic_and_expires():
     finally:
         redis.delete(stored_key)
         redis.close()
+
+
+def test_session_resolution_is_read_only_and_does_not_block_revocation():
+    from datetime import UTC, datetime, timedelta
+
+    settings = get_settings()
+    engine = create_engine(settings.database_url.get_secret_value())
+    tenant_id = None
+    token = uuid4().hex
+    try:
+        with Session(engine) as setup, setup.begin():
+            repository = SqlIdentityRepository(setup)
+            user_id = repository.register(
+                "Read-only resolution",
+                "readonly-" + uuid4().hex,
+                "Owner",
+                "readonly@example.com",
+                "unused-test-hash",
+            )
+            tenant_id = setup.get(UserRow, user_id).tenant_id
+            repository.add_session(user_id, token, datetime.now(UTC) + timedelta(hours=1))
+        with Session(engine) as reader, reader.begin():
+            reader.execute(text("SET TRANSACTION READ ONLY"))
+            repository = SqlIdentityRepository(reader)
+            principal = repository.resolve(token)
+            assert principal is not None and principal.role == Role.OWNER
+            # A second transaction can update/revoke while the first request remains open.
+            with Session(engine) as writer, writer.begin():
+                writer.execute(text("SET LOCAL lock_timeout = '500ms'"))
+                SqlIdentityRepository(writer).update_member(tenant_id, user_id, Role.OWNER, False)
+            assert principal.role == Role.OWNER  # Already-resolved requests retain their snapshot.
+            assert repository.resolve(token) is None
+            assert reader.get(SessionRow, token_digest(token)) is None
+        with TestClient(create_app(settings)) as client:
+            client.cookies.set("pulse_session", token)
+            assert client.get("/api/v1/auth/me").status_code == 401
+    finally:
+        if tenant_id:
+            with engine.begin() as connection:
+                for table in (SessionRow, UserRow):
+                    connection.execute(delete(table).where(table.tenant_id == tenant_id))
+                connection.execute(delete(TenantRow).where(TenantRow.id == tenant_id))
+        engine.dispose()

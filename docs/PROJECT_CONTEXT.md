@@ -488,9 +488,17 @@ A revisão do PR #3 identificou que o limite por IP era compartilhado pelo proxy
 A correção sobrescreve headers no Nginx e limita a confiança do Uvicorn ao IP fixo
 desse container em uma rede proxy dedicada. Um teste de deployment com dois IPs
 TCP reais cobre isolamento de buckets e falsificação de headers. Não ampliar a
-confiança para * ou para toda a subnet. As observações sobre revalidação de
-MonitorConfig na leitura e locks FOR SHARE por requisição continuam pendentes
-para antes do M2; não foram alteradas pela correção de proxy.
+confiança para * ou para toda a subnet.
+
+Na revisão seguinte, MonitorConfig.create passou a validar apenas entrada nova ou
+alterada; hidratação do banco preserva o snapshot, sem reaplicar regras atuais.
+Mudanças futuras de política exigem migração/estado explícito e proteção no worker.
+A resolução de identidade não usa mais FOR SHARE: requisições em andamento podem
+terminar com o papel anterior; as próximas após o commit da revogação são negadas.
+Locks exclusivos de mutações foram mantidos. O handler HTTP respeita subclasses
+pela MRO e sanitiza erros sem mapeamento. O risco de bloqueio direcionado pelo
+limite de conta está documentado no ADR 0019; backoff/dispositivo validado continuam
+pendentes antes de exposição pública. Não considerar esse risco mitigado só pela documentação.
 
 Antes de uso público, completar convites, recuperação/troca de senha, verificação
 de email e demais controles de identidade/deploy descritos no ADR 0019. No M2,

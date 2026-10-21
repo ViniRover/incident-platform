@@ -29,8 +29,11 @@ outra organização retorna 404. UUID não substitui autorização.
 Aplicar quatro papéis: owner, admin, operator e viewer. Owner administra todos os
 papéis exceto transferência de propriedade; admin administra operator/viewer;
 operator altera monitores; viewer apenas consulta monitores. Leitura da identidade
-usa lock compartilhado e alteração de membro usa lock de linha no PostgreSQL para
-serializar mudanças concorrentes de autorização. Alterar acesso revoga sessões.
+usa SELECT sem lock de linha; a alteração de membro mantém lock exclusivo do alvo
+e revalida sua autorização após o lock para serializar alterações concorrentes.
+Alterar acesso revoga sessões na mesma transação. Requisições já autenticadas podem
+terminar com o papel lido anteriormente; após o commit, a próxima resolução da
+sessão é negada. Não se garante cancelamento retroativo de operações em andamento.
 
 Usar unicidade `(tenant_id, email)` e chave estrangeira composta entre sessões e
 `(tenant_id, user_id)`, impedindo associar sessão e usuário de tenants diferentes.

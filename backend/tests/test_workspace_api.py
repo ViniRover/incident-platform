@@ -268,3 +268,48 @@ def test_registration_rejects_passwords_below_fifteen_characters(workspace):
         },
     )
     assert response.status_code == 422
+
+
+def test_stored_monitor_remains_readable_and_editable_after_url_policy_changes(
+    workspace, monkeypatch
+):
+    from pulse.features.monitors import domain
+
+    client, _ = workspace
+    owner = register(client)
+    old_input = monitor_input(url="https://service.corp/")
+    created = client.post("/api/v1/monitors", json=old_input, headers=headers(owner))
+    assert created.status_code == 201
+    monitor = created.json()
+    path = f"/api/v1/monitors/{monitor['id']}"
+    # Compare persisted responses; SQLite does not preserve timezone offsets on hydration.
+    stored = client.get(path).json()
+    original_validator = domain.validate_url
+
+    def tightened_policy(url):
+        if ".corp" in url:
+            raise ValueError("Corporate domains are no longer accepted.")
+        return original_validator(url)
+
+    monkeypatch.setattr(domain, "validate_url", tightened_policy)
+    listing = client.get("/api/v1/monitors")
+    assert listing.status_code == 200
+    assert listing.json() == [stored]
+    detail = client.get(path)
+    assert detail.status_code == 200
+    assert detail.json() == stored
+    assert (
+        client.post("/api/v1/monitors", json=old_input, headers=headers(owner)).status_code == 422
+    )
+    assert (
+        client.put(
+            path, json={**old_input, "config_version": 1}, headers=headers(owner)
+        ).status_code
+        == 422
+    )
+    repaired = client.put(
+        path, json={**monitor_input(), "config_version": 1}, headers=headers(owner)
+    )
+    assert repaired.status_code == 200
+    assert repaired.json()["url"] == "https://example.com/"
+    assert repaired.json()["config_version"] == 2

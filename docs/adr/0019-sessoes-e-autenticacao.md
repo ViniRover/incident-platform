@@ -5,7 +5,8 @@ Aceito no M1.
 
 ## Contexto
 O dashboard precisa autenticar usuários, encerrar acessos e aplicar mudanças de papel
-imediatamente. O M1 não requer autenticação distribuída entre serviços externos.
+nas próximas requisições após o commit. O M1 não requer autenticação distribuída
+entre serviços externos.
 
 ## Forças da decisão
 Revogação, armazenamento de credenciais, CSRF, resistência a tentativas automatizadas
@@ -24,6 +25,12 @@ O cookie não fica em localStorage/sessionStorage nem aparece nas respostas JSON
 
 Cada requisição revalida validade da sessão, usuário ativo, tenant e papel no banco.
 Login rotaciona a sessão atual. Logout e alterações de papel/ativação revogam sessões.
+Resolver a sessão usa SELECT sem FOR SHARE: uma leitura autenticada não deve
+adquirir lock de linha nem atrasar a revogação até o fim da requisição. Mantemos
+populate_existing para não reaproveitar estado antigo do identity map.
+Aceitamos que uma requisição que já resolveu a identidade termine com o papel
+anterior, inclusive uma mutação. Após o commit da revogação, a próxima requisição
+é negada. Alterações de membros mantêm o lock exclusivo e a revalidação do alvo.
 Senhas têm 15–128 caracteres e hash Argon2id com 19 MiB, duas iterações e paralelismo 1.
 Não são impostas combinações artificiais de classes de caracteres. Um hash fictício
 também é verificado quando a conta não existe, e erros de login são genéricos.
@@ -53,11 +60,15 @@ Nginx aplica CSP de mesma origem, bloqueio de framing, nosniff e política de re
 Validações e erros de persistência não refletem senhas ou detalhes SQL nas respostas.
 
 ## Consequências positivas
-Revogação simples, ausência de chave JWT de assinatura e permissões sempre atuais.
+Revogação simples, ausência de chave JWT de assinatura e permissões consultadas
+a cada resolução da sessão, sem lock de linha em leituras autenticadas.
 Controles podem ser verificados por testes HTTP e de infraestrutura.
 
 ## Consequências negativas
-Cada sessão depende de PostgreSQL e tem custo de consulta/lock por requisição.
+Cada sessão depende de PostgreSQL e tem custo de consulta por requisição.
+Revogação não cancela requisições em andamento. Se houver necessidade de revogação
+estritamente serializada com operações sensíveis, adicionar um mecanismo específico
+nesses casos de uso, medido em carga, em vez de bloquear todas as leituras.
 Não há MFA, recuperação de senha, verificação de email, convite por email, troca de
 senha ou bloqueio por lista de credenciais vazadas no M1. O administrador define
 a senha inicial do membro; isso é uma limitação do fluxo local, não um convite seguro.
@@ -67,9 +78,28 @@ Nginx exige redesenhar explicitamente a cadeia de confiança; não basta aceitar
 o X-Forwarded-For externo. Subnets devem evitar conflitos com VPNs/outras stacks.
 Sessões expiradas precisam de rotina de limpeza operacional. CSP não elimina XSS.
 
+### Risco aceito: bloqueio direcionado por conta
+
+O limite login-account é de 10 tentativas por 60 segundos por tenant/ email
+normalizado, incluindo tentativas válidas. Quem conhece esses identificadores
+pode consumir o bucket repetidamente e impedir novos logins da vítima, mesmo de
+outro IP. Não é bloqueio persistente: cada janela expira, mas o atacante pode
+renovar o abuso a cada janela. Sessões já abertas não são revogadas pelo limite.
+O limite por IP não elimina um ataque direcionado/distribuído. Aceitamos essa
+limitação no M1 local; ela não está resolvida pela correção de proxy.
+
+Antes de exposição pública, avaliar backoff progressivo por conta combinado com
+limites por origem e um caminho controlado para dispositivo previamente validado.
+Dispositivo confiável deve usar uma credencial revogável, não IP, User-Agent ou
+header fornecido pelo cliente. Alertas, recuperação segura e MFA complementam o
+controle. Não desabilitar o limite por conta sem uma proteção substituta.
+
 ## Validação
 Testes cobrem hash de senha, ausência de token bruto no banco, expiração, logout,
 rotação, revogação por mudança de papel, CSRF, Origin, 429 e falha de dependência.
+Um teste PostgreSQL resolve a sessão em transação READ ONLY, mantém essa leitura
+aberta durante atualização/revogação em outra conexão com lock_timeout de 500 ms
+e verifica que a sessão removida retorna 401 na próxima requisição.
 O script Redis é testado no Redis real e o fluxo HTTP usa transações PostgreSQL reais.
 O teste opt-in test_proxy_identity.py usa dois containers com IPs TCP distintos:
 esgota login/cadastro de um sem bloquear o outro, tenta falsificar headers na borda
@@ -85,3 +115,4 @@ de recuperação de conta, credenciais comprometidas e limpeza de sessões.
 - https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html
 - https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
 - https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html
+- https://www.postgresql.org/docs/17/explicit-locking.html#LOCKING-ROWS
