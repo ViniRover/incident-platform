@@ -463,7 +463,7 @@ Ao continuar o projeto, usar este documento como fonte principal de contexto. De
 ## Estado implementado — M1
 
 O M0 foi integrado pelo PR #1. O M1 foi desenvolvido na branch local
-`codex/m1-tenant-monitors`, mantendo a arquitetura acima e a alteração preexistente
+`tenant-monitors` (renomeada de `codex/m1-tenant-monitors`), mantendo a arquitetura acima e a alteração preexistente
 do lifespan em `main.py`.
 
 Foram implementados cadastro de organização/owner, login/logout com sessão opaca
@@ -482,7 +482,15 @@ os resultados locais e limitações estão em `docs/M1_VALIDATION.md`.
 A validação local inclui 61 testes rápidos de backend, seis de integração real,
 16 de frontend, builds, verificação de contrato, migrations em banco novo e
 round-trip de migration em banco dedicado. O CI remoto do M1 depende da futura
-publicação da branch; não presumir seu resultado.
+publicação da branch; essa evidência original não certifica commits posteriores.
+
+A revisão do PR #3 identificou que o limite por IP era compartilhado pelo proxy.
+A correção sobrescreve headers no Nginx e limita a confiança do Uvicorn ao IP fixo
+desse container em uma rede proxy dedicada. Um teste de deployment com dois IPs
+TCP reais cobre isolamento de buckets e falsificação de headers. Não ampliar a
+confiança para * ou para toda a subnet. As observações sobre revalidação de
+MonitorConfig na leitura e locks FOR SHARE por requisição continuam pendentes
+para antes do M2; não foram alteradas pela correção de proxy.
 
 Antes de uso público, completar convites, recuperação/troca de senha, verificação
 de email e demais controles de identidade/deploy descritos no ADR 0019. No M2,

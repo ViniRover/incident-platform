@@ -65,6 +65,16 @@ Compose waits for the database, runs migrations in a separate process, and start
 PostgreSQL and Redis do not publish ports by default. Application ports are bound
 to `127.0.0.1` only.
 
+Nginx overwrites forwarded client-IP/protocol headers. Uvicorn trusts only nginx's
+fixed `PULSE_PROXY_IP` on the dedicated proxy network, never every container or
+arbitrary client headers. The standalone backend image disables proxy headers.
+If `PULSE_PROXY_SUBNET` conflicts with a VPN or another project, change it together
+with `PULSE_PROXY_DYNAMIC_RANGE` and `PULSE_PROXY_IP` in `.env`. Keep the fixed IP
+inside the subnet but outside the dynamic range, so the API cannot take it before
+nginx starts. Each simultaneous
+stack needs a distinct proxy subnet. Clients behind the same NAT still share an IP
+bucket; adding a CDN/load balancer requires a separately reviewed trust chain.
+
 ```powershell
 docker compose ps
 docker compose logs -f api
@@ -156,6 +166,21 @@ the test API container's network namespace, removing it when the step exits.
 M1 adds `alembic check`, migration rollback/reapplication on the fresh CI database,
 tenant-isolation and RBAC scenarios against PostgreSQL, and a real-transaction test
 with concurrent writes to the same monitor version.
+
+With the full stack and development database ports running, the opt-in deployment
+regression uses two temporary containers with different real source IPs:
+
+```powershell
+# From backend/. Set COMPOSE_PROJECT_NAME if using a non-default Compose project.
+$env:PULSE_PROXY_INTEGRATION = "1"
+uv run --env-file ../.env pytest tests/integration/test_proxy_identity.py -v
+Remove-Item Env:PULSE_PROXY_INTEGRATION
+```
+
+It verifies separate login/registration buckets, nginx header overwriting, and
+rejection of spoofed headers on direct API connections. It removes its temporary
+containers and test records; it never flushes Redis or deletes application data.
+CI runs this test after building and starting nginx and Uvicorn.
 
 ## Failure demonstration
 

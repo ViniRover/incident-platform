@@ -36,8 +36,18 @@ Origin e SameSite são camadas adicionais, não substitutos do token CSRF.
 
 Redis limita cadastro e login com incremento e expiração atômicos. Chaves são
 resumos sem email/IP legíveis. Redis indisponível impede novas autenticações;
-sessões já autenticadas continuam consultando PostgreSQL. O endereço usado pelo
-limite de origem é o peer ASGI, sem confiar em X-Forwarded-For arbitrário.
+sessões já autenticadas continuam consultando PostgreSQL. O limite usa o cliente
+ASGI depois do tratamento de proxy do Uvicorn, nunca lê X-Forwarded-For diretamente.
+Na stack Compose, o Nginx de borda sobrescreve X-Forwarded-For e X-Real-IP com
+$remote_addr e X-Forwarded-Proto com $scheme. A API usa --proxy-headers e
+--forwarded-allow-ips apenas para o IP fixo desse Nginx (PULSE_PROXY_IP).
+A rede proxy tem subnet configurável (PULSE_PROXY_SUBNET), separada da rede dos
+bancos. O IP fixo fica fora de PULSE_PROXY_DYNAMIC_RANGE, evitando que a API o
+receba antes da inicialização do Nginx. A API participa das duas redes; o Nginx
+participa somente da rede proxy.
+Não confiar em *, no gateway Docker ou na subnet inteira. Conexões diretas à API
+continuam usando o peer TCP, ignorando headers de outros containers/host.
+A imagem backend fora do Compose desabilita proxy headers por padrão.
 
 Nginx aplica CSP de mesma origem, bloqueio de framing, nosniff e política de referência.
 Validações e erros de persistência não refletem senhas ou detalhes SQL nas respostas.
@@ -51,14 +61,19 @@ Cada sessão depende de PostgreSQL e tem custo de consulta/lock por requisição
 Não há MFA, recuperação de senha, verificação de email, convite por email, troca de
 senha ou bloqueio por lista de credenciais vazadas no M1. O administrador define
 a senha inicial do membro; isso é uma limitação do fluxo local, não um convite seguro.
-Antes de exposição pública, esses fluxos e o proxy confiável precisam ser tratados.
-O limite por peer pode ser compartilhado atrás do Nginx até configurar ingress confiável.
+Antes de exposição pública, esses fluxos precisam ser tratados. Clientes atrás de
+um mesmo NAT ainda compartilham o limite por IP. Um balanceador/CDN antes deste
+Nginx exige redesenhar explicitamente a cadeia de confiança; não basta aceitar
+o X-Forwarded-For externo. Subnets devem evitar conflitos com VPNs/outras stacks.
 Sessões expiradas precisam de rotina de limpeza operacional. CSP não elimina XSS.
 
 ## Validação
 Testes cobrem hash de senha, ausência de token bruto no banco, expiração, logout,
 rotação, revogação por mudança de papel, CSRF, Origin, 429 e falha de dependência.
 O script Redis é testado no Redis real e o fluxo HTTP usa transações PostgreSQL reais.
+O teste opt-in test_proxy_identity.py usa dois containers com IPs TCP distintos:
+esgota login/cadastro de um sem bloquear o outro, tenta falsificar headers na borda
+e conecta diretamente à API para verificar que somente Nginx é confiável.
 
 ## Quando reconsiderar
 Adotar OIDC/MFA e convite de uso único antes de atender usuários externos. Rever

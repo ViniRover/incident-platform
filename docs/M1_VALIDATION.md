@@ -140,3 +140,44 @@ verificada por geração e casos mínimos, não por um comparador semântico com
 
 As limitações funcionais e de segurança estão no [guia do M1](M1_IMPLEMENTATION.md)
 e no [ADR de autenticação](adr/0019-sessoes-e-autenticacao.md).
+
+## Correção do review do PR #3 — IP real atrás do proxy (2026-10-21)
+
+O resultado histórico acima é anterior à publicação do PR. Nesta revisão, o
+bloqueador de rate limit foi reproduzido na stack antiga: depois de esgotar o
+bucket compartilhado do Nginx, um novo container cliente recebeu 429 já na
+primeira tentativa de login. Variar headers não mudou esse bucket.
+
+Correção aplicada:
+
+- Nginx sobrescreve X-Forwarded-For/X-Real-IP com o peer TCP e o protocolo com $scheme.
+- A API confia exclusivamente no IP fixo do Nginx na rede proxy dedicada.
+- O IP fixo está fora do pool dinâmico, evitando colisão na inicialização da API.
+- A imagem backend standalone desabilita proxy headers; Compose habilita explicitamente.
+- O CI inclui o teste de deployment depois de subir a stack e seleciona a rede
+  proxy explicitamente no teste de recriação da API (agora ela tem duas redes).
+
+Validação local da correção:
+
+- 61 testes rápidos passaram; cobertura 97,76%; Ruff e formatação passaram (50 arquivos).
+- Sete testes de integração passaram contra PostgreSQL/Redis reais, incluindo o
+  novo test_proxy_identity.py com Nginx/Uvicorn reais e dois containers clientes.
+- O primeiro cliente obteve 401 em 60 logins e 429 no seguinte; mudar headers não
+  burlou o limite. Cinco cadastros conflitantes retornaram 409 e o sexto, 429.
+- O segundo cliente continuou recebendo 401 no login e 409 no cadastro, mesmo
+  enviando o mesmo header falso. Conexões diretas à API não puderam assumir IPs
+  enviados no header, inclusive o IP do cliente com bucket esgotado.
+- Builds das duas imagens e Compose up --wait passaram. A API foi recriada com
+  outro IP sem recriar Nginx; readiness via :8080 voltou a 200. nginx -t passou.
+
+A stack pulse-m1-review foi recriada preservando os volumes. Containers temporários
+e registros/chaves pertencentes ao teste foram removidos; não houve flush do Redis.
+Um primeiro ensaio revelou colisão do IP fixo com a alocação dinâmica; a separação
+do pool corrigiu isso e a stack passou a iniciar normalmente.
+O novo commit exige novo CI remoto; não usar o resultado do commit anterior como
+evidência desta correção. Revalidação de MonitorConfig na leitura e o custo dos
+locks FOR SHARE por requisição permanecem pendentes para antes do M2.
+
+Referências da configuração: [Uvicorn](https://www.uvicorn.org/settings/),
+[Nginx](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_set_header),
+[redes Compose/IPAM](https://docs.docker.com/reference/compose-file/networks/#ipam).

@@ -91,10 +91,15 @@ o gateway envia esse valor em `X-CSRF-Token` nas alterações e no logout. A com
 é resistente a diferenças de tempo. Origins fora da lista configurada são negadas.
 
 Redis executa incremento e expiração em um script atômico para limitar cadastro e
-login. Há limite por peer e por conta; as chaves não expõem email/IP em texto.
+login. Há limite por IP de cliente e por conta; as chaves não expõem email/IP em texto.
 Se Redis estiver indisponível, novas autenticações falham de forma controlada;
-sessões existentes continuam no PostgreSQL. O proxy não é tratado como fonte
-confiável de qualquer X-Forwarded-For recebido.
+sessões existentes continuam no PostgreSQL. Na borda, Nginx sobrescreve os headers
+de IP/protocolo recebidos do cliente. Compose fixa apenas o IP do Nginx na rede
+proxy e configura Uvicorn para confiar exclusivamente nesse endereço. Assim,
+request.client.host identifica o cliente real visto pelo Nginx, e não o container
+Nginx compartilhado por todos. Headers enviados diretamente à API por outros
+peers são ignorados. Não se usa confiança global (*). Clientes sob um mesmo NAT
+ainda compartilham o bucket; CDN/balanceador adicional requer configuração própria.
 
 Erros de validação não refletem o valor enviado, protegendo senhas nas respostas.
 Conflitos retornam 409, ausência de sessão 401, falta de permissão 403, recurso
