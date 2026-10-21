@@ -181,3 +181,22 @@ locks FOR SHARE por requisição permanecem pendentes para antes do M2.
 Referências da configuração: [Uvicorn](https://www.uvicorn.org/settings/),
 [Nginx](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_set_header),
 [redes Compose/IPAM](https://docs.docker.com/reference/compose-file/networks/#ipam).
+
+## Correção da composição do CI após a revisão
+
+O log do job integration do commit a81edbf confirmou conexão recusada em
+localhost:5432 e localhost:6379 no teste de proxy. A etapa de build iniciava a
+stack apenas com compose.yaml, removendo as portas publicadas pela configuração
+compose.dev.yaml usada anteriormente. A validação local anterior sempre usava os
+dois arquivos e, por isso, não exercitava essa diferença do workflow.
+
+O job agora define COMPOSE_FILE=compose.yaml:compose.dev.yaml (sintaxe do runner
+Linux). Todas as chamadas Compose do job e dos subprocessos de teste passam a
+usar a mesma composição: setup, build, recriação da API, recuperação, logs e down.
+A configuração padrão fora do CI continua sem publicar PostgreSQL/Redis.
+Nenhuma mudança foi feita na cadeia de confiança do proxy, e os findings #2 a #5
+permanecem pendentes. O finding #2 deve ser resolvido antes do M2.
+
+Localmente, a sequência de build/up com COMPOSE_FILE preservou as publicações
+127.0.0.1:5432 e 127.0.0.1:6379. Os sete testes de integração, incluindo a regressão
+de proxy, passaram em seguida com essa mesma composição. Volumes foram preservados.

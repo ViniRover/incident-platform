@@ -54,6 +54,8 @@ jobs:
   integration:
     runs-on: ubuntu-latest
     env:
+      # Keep host DB/Redis ports across every Compose call, including test subprocesses.
+      COMPOSE_FILE: compose.yaml:compose.dev.yaml
       PULSE_DATABASE_URL: postgresql+psycopg://pulse:pulse_local_only@localhost:5432/pulse
       PULSE_REDIS_URL: redis://localhost:6379/0
     steps:
@@ -63,7 +65,7 @@ jobs:
           version: '0.12.20'
       - run: uv sync --frozen --python 3.12
         working-directory: backend
-      - run: docker compose -f compose.yaml -f compose.dev.yaml up -d --wait postgres redis
+      - run: docker compose up -d --wait postgres redis
       - run: uv run alembic upgrade head && uv run alembic upgrade head && uv run alembic check
         working-directory: backend
       - name: Verify M1 migration rollback on the fresh test database
