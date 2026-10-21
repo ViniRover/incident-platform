@@ -5,12 +5,33 @@ The canonical project context and roadmap are in [docs/PROJECT_CONTEXT.md](docs/
 
 ## Project status
 
-M0 provides a runnable foundation with React/TypeScript, FastAPI, PostgreSQL/TimescaleDB,
-and Redis. The diagnostics screen queries the real API and displays dependency failures.
-Authentication, tenants, monitors, the scheduler, workers, and incidents will be implemented
-in later milestones. The original roadmap decisions remain in effect.
-Local validation results and pending integration checks are recorded in
-[docs/M0_VALIDATION.md](docs/M0_VALIDATION.md).
+M1 adds organization registration, session authentication, role-based access control,
+member management, and tenant-scoped monitor configuration to the M0 foundation.
+The React dashboard uses a TypeScript client generated from FastAPI's OpenAPI schema.
+Schedulers, HTTP checks, and incidents belong to later milestones; configured monitors
+do not yet report availability.
+
+Read the [M1 implementation walkthrough](docs/M1_IMPLEMENTATION.md) for a detailed
+explanation in Portuguese, the [M1 validation record](docs/M1_VALIDATION.md) for executed
+checks, and [M0 validation](docs/M0_VALIDATION.md) for the historical foundation.
+
+## First use
+
+Start the Docker stack, open http://localhost:8080, and choose **Criar uma organização**.
+Provide a display name, a lowercase organization slug, your name, email, and a password
+of 15–128 characters. Sign in using the same organization slug and email.
+Create a public HTTP(S) monitor from **Novo monitor**. Owners and admins can manage
+members from **Pessoas e acessos**. The interface is currently in Portuguese.
+
+| Role | Monitor access | Member management |
+| --- | --- | --- |
+| owner | Read/write | Admin, operator, viewer |
+| admin | Read/write | Operator and viewer |
+| operator | Read/write | None |
+| viewer | Read-only | None |
+
+Monitor updates and deletion require the current `config_version`; stale versions
+return 409. Cross-tenant resources return 404. API documentation is available at `/docs`.
 
 ## Run with Docker
 
@@ -31,6 +52,8 @@ already initialized PostgreSQL volume.
 The API and migrations require both `PULSE_DATABASE_URL` and `PULSE_REDIS_URL`.
 Missing settings fail validation before startup. Compose supplies both values;
 host-side commands load them explicitly from `.env`.
+The environment example also documents cookie security, session duration, and allowed
+origins. Set `PULSE_COOKIE_SECURE=true` and explicit HTTPS origins when deploying behind TLS.
 
 - Frontend: http://localhost:8080
 - OpenAPI/Swagger: http://localhost:8000/docs
@@ -103,6 +126,17 @@ npm test
 npm run build
 ```
 
+Generate the API contract and TypeScript types after changing API DTOs or routes:
+
+```powershell
+npm run api:generate
+```
+
+This requires the backend virtual environment created by `uv sync --frozen`.
+The artifacts are `contracts/openapi.json` and `frontend/src/shared/api/schema.d.ts`.
+Do not edit generated types manually. CI runs `npm run api:check` to detect drift.
+The application uses `/api/v1`; incompatible changes require an explicit versioning plan.
+
 Integration tests require the services from `compose.dev.yaml` and applied migrations.
 From `backend/`, in PowerShell:
 
@@ -119,6 +153,9 @@ and extension, builds both images, and tests proxy communication, API recreation
 Redis failure/recovery, and packet loss on an established PostgreSQL connection.
 The packet-loss check runs on Linux and installs a temporary firewall rule only in
 the test API container's network namespace, removing it when the step exits.
+M1 adds `alembic check`, migration rollback/reapplication on the fresh CI database,
+tenant-isolation and RBAC scenarios against PostgreSQL, and a real-transaction test
+with concurrent writes to the same monitor version.
 
 ## Failure demonstration
 
@@ -144,23 +181,30 @@ backend/
     main.py                  # application composition and lifecycle
     platform/                # configuration and shared infrastructure resources
     features/health/         # use case, contract, adapters, DI, and routes
+    features/identity/       # tenants, users, sessions, RBAC, CSRF, and auth throttling
+    features/monitors/       # versioned monitor configuration and tenant-scoped repositories
   migrations/                # Alembic history; core + telemetry in one cluster
   tests/                     # unit, HTTP, and real integration tests
 frontend/
   src/app/                   # application composition and global styles
   src/features/system-health/# contract, HTTP adapter, hook, and components
+  src/features/identity/     # account forms, members, and typed HTTP gateway
+  src/features/monitors/     # monitor editor, paginated dashboard, and typed gateway
+  src/shared/api/            # generated OpenAPI types and shared client
   src/shared/ui/             # reusable UI components
 compose.yaml                 # default local stack
 compose.dev.yaml             # optional host access to dependencies
 .github/workflows/ci.yaml     # quality checks, integration, and builds
 docs/adr/                    # decisions and review criteria
+contracts/openapi.json       # generated API contract
+scripts/export-contract.mjs  # deterministic backend contract export
 ```
 
 Read the [conventions](docs/CONVENTIONS.md), [modular monolith ADR](docs/adr/0001-monolito-modular.md),
 and [infrastructure ADR](docs/adr/0018-base-local-e-ci.md) before adding features.
 These supporting documents are currently written in Portuguese.
 
-## M0 limitations
+## Current limitations
 
 - Compose is the foundation for local development and CI; production deployment is covered in M9.
 - The local PostgreSQL user can install the extension. Production must separate
@@ -173,6 +217,17 @@ These supporting documents are currently written in Portuguese.
   Prometheus, Grafana, and OpenTelemetry collection will be added in that milestone.
 - Scheduler and worker processes will be added as entrypoints in the same package
   when their respective milestones are implemented.
+- Authentication uses revocable HttpOnly cookie sessions with CSRF protection and
+  Redis throttling. Password recovery/change, email verification, MFA, invitation
+  links, and compromised-password screening are not implemented. Administrators
+  currently set initial member passwords; complete these identity flows before
+  exposing the application to real users. See [ADR 0019](docs/adr/0019-sessoes-e-autenticacao.md).
+- Tenant isolation is enforced by application policies and scoped queries, without RLS.
+  Monitor URL validation is preliminary; workers must still enforce SSRF protection
+  at execution time, including DNS resolution, redirects, and rebinding.
+- Member-role changes revoke the target user's sessions. Ownership transfer and
+  automatic removal of expired sessions are deferred. Offset pagination does not
+  provide a stable snapshot during concurrent edits.
 - PostgreSQL connections use libpq TCP timeouts and keepalives in addition to
   connection and statement timeouts. Socket option support depends on the OS.
   These protect against lost TCP traffic; they are not an overall readiness deadline
