@@ -85,8 +85,8 @@ jobs:
           old_ip=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$api_id")
           network=$(docker inspect --format '{{range $name, $config := .NetworkSettings.Networks}}{{$name}}{{end}}' "$api_id")
           docker compose rm --stop --force api
-          # Reserve its former IP so the new API must get a different address.
-          reservation=$(docker run --rm -d --network "$network" --ip "$old_ip" --entrypoint python pulse-backend:local -c 'import time; time.sleep(120)')
+          # Occupy the next allocation before recreation, without requiring static IPAM.
+          reservation=$(docker run --rm -d --network "$network" --entrypoint python pulse-backend:local -c 'import time; time.sleep(120)')
           trap 'docker rm -f "$reservation"' EXIT
           docker compose up -d --no-deps --wait api
           new_ip=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$(docker compose ps -q api)")
