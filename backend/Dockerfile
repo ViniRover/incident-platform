@@ -16,4 +16,5 @@ COPY --chown=pulse:pulse alembic.ini ./
 COPY --chown=pulse:pulse migrations ./migrations
 USER pulse
 EXPOSE 8000
-CMD ["uvicorn", "pulse.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+# Standalone image trusts no proxy; Compose explicitly opts in to its edge nginx only.
+CMD ["uvicorn", "pulse.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--no-proxy-headers"]

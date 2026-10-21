@@ -40,7 +40,13 @@ jobs:
           node-version: '24'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.20'
+      - run: uv sync --frozen --python 3.12
+        working-directory: backend
       - run: npm ci
+      - run: npm run api:check
       - run: npm run lint
       - run: npm test
       - run: npm run build
@@ -48,6 +54,8 @@ jobs:
   integration:
     runs-on: ubuntu-latest
     env:
+      # Keep host DB/Redis ports across every Compose call, including test subprocesses.
+      COMPOSE_FILE: compose.yaml:compose.dev.yaml
       PULSE_DATABASE_URL: postgresql+psycopg://pulse:pulse_local_only@localhost:5432/pulse
       PULSE_REDIS_URL: redis://localhost:6379/0
     steps:
@@ -57,8 +65,11 @@ jobs:
           version: '0.12.20'
       - run: uv sync --frozen --python 3.12
         working-directory: backend
-      - run: docker compose -f compose.yaml -f compose.dev.yaml up -d --wait postgres redis
-      - run: uv run alembic upgrade head && uv run alembic upgrade head
+      - run: docker compose up -d --wait postgres redis
+      - run: uv run alembic upgrade head && uv run alembic upgrade head && uv run alembic check
+        working-directory: backend
+      - name: Verify M1 migration rollback on the fresh test database
+        run: uv run alembic downgrade 0001 && uv run alembic upgrade head && uv run alembic check
         working-directory: backend
       - run: uv run pytest -m integration -v
         working-directory: backend
@@ -66,6 +77,11 @@ jobs:
           PULSE_INTEGRATION: '1'
       - run: docker compose up -d --build --wait
       - run: curl --fail http://localhost:8080/ && curl --fail http://localhost:8080/api/v1/health/ready
+      - name: Real proxy client IP isolation and spoofing regression
+        run: uv run pytest tests/integration/test_proxy_identity.py -v
+        working-directory: backend
+        env:
+          PULSE_PROXY_INTEGRATION: '1'
       - name: Pooled PostgreSQL connection under packet loss
         shell: bash
         run: |
@@ -82,14 +98,14 @@ jobs:
         run: |
           frontend_id=$(docker compose ps -q frontend)
           api_id=$(docker compose ps -q api)
-          old_ip=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$api_id")
-          network=$(docker inspect --format '{{range $name, $config := .NetworkSettings.Networks}}{{$name}}{{end}}' "$api_id")
+          network=$(docker inspect --format '{{range $name, $config := .NetworkSettings.Networks}}{{$name}}{{end}}' "$frontend_id")
+          old_ip=$(docker inspect --format "{{(index .NetworkSettings.Networks \"$network\").IPAddress}}" "$api_id")
           docker compose rm --stop --force api
-          # Occupy the next allocation before recreation, without requiring static IPAM.
+          # Occupy the API's old proxy-network allocation (nginx alone has a static IP).
           reservation=$(docker run --rm -d --network "$network" --entrypoint python pulse-backend:local -c 'import time; time.sleep(120)')
           trap 'docker rm -f "$reservation"' EXIT
           docker compose up -d --no-deps --wait api
-          new_ip=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$(docker compose ps -q api)")
+          new_ip=$(docker inspect --format "{{(index .NetworkSettings.Networks \"$network\").IPAddress}}" "$(docker compose ps -q api)")
           test "$new_ip" != "$old_ip"
           test "$(docker compose ps -q frontend)" = "$frontend_id"
           curl --fail --max-time 6 --retry 12 --retry-all-errors --retry-delay 1 http://localhost:8080/api/v1/health/ready

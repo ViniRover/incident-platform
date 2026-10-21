@@ -32,7 +32,7 @@ def test_real_dependencies_and_migration() -> None:
             ).scalar_one()
             assert (
                 connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-                == "0001"
+                == "0002"
             )
     finally:
         engine.dispose()

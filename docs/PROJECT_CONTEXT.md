@@ -459,3 +459,47 @@ Que sinais indicariam que a decisão deixou de ser adequada?
 ## Orientação para futuras conversas
 
 Ao continuar o projeto, usar este documento como fonte principal de contexto. Decisões posteriores podem alterá-lo, mas mudanças arquiteturais devem ser explícitas e acompanhadas de ADR. O objetivo do portfólio não é apenas mostrar ferramentas, mas demonstrar por que foram escolhidas, quais custos introduzem e quais evidências justificam mantê-las ou substituí-las.
+
+## Estado implementado — M1
+
+O M0 foi integrado pelo PR #1. O M1 foi desenvolvido na branch local
+`tenant-monitors` (renomeada de `codex/m1-tenant-monitors`), mantendo a arquitetura acima e a alteração preexistente
+do lifespan em `main.py`.
+
+Foram implementados cadastro de organização/owner, login/logout com sessão opaca
+revogável, senhas Argon2id, cookie HttpOnly, CSRF e limitação de tentativas no Redis.
+O RBAC usa owner/admin/operator/viewer. Usuários pertencem a um tenant; não há
+identidade global compartilhada entre organizações nesta versão.
+
+O CRUD de monitores tem filtros obrigatórios por tenant, paginação, validação
+preliminar de URL e controle de edição por config_version. O dashboard React usa
+tipos e cliente derivados do OpenAPI. Monitores ainda não executam checks.
+
+ADRs adicionados: 0002 (multi-tenancy/RBAC), 0003 (contrato OpenAPI/cliente) e 0019
+(autenticação/sessões). A explicação detalhada está em `docs/M1_IMPLEMENTATION.md`;
+os resultados locais e limitações estão em `docs/M1_VALIDATION.md`.
+
+A validação local inclui 61 testes rápidos de backend, seis de integração real,
+16 de frontend, builds, verificação de contrato, migrations em banco novo e
+round-trip de migration em banco dedicado. O CI remoto do M1 depende da futura
+publicação da branch; essa evidência original não certifica commits posteriores.
+
+A revisão do PR #3 identificou que o limite por IP era compartilhado pelo proxy.
+A correção sobrescreve headers no Nginx e limita a confiança do Uvicorn ao IP fixo
+desse container em uma rede proxy dedicada. Um teste de deployment com dois IPs
+TCP reais cobre isolamento de buckets e falsificação de headers. Não ampliar a
+confiança para * ou para toda a subnet.
+
+Na revisão seguinte, MonitorConfig.create passou a validar apenas entrada nova ou
+alterada; hidratação do banco preserva o snapshot, sem reaplicar regras atuais.
+Mudanças futuras de política exigem migração/estado explícito e proteção no worker.
+A resolução de identidade não usa mais FOR SHARE: requisições em andamento podem
+terminar com o papel anterior; as próximas após o commit da revogação são negadas.
+Locks exclusivos de mutações foram mantidos. O handler HTTP respeita subclasses
+pela MRO e sanitiza erros sem mapeamento. O risco de bloqueio direcionado pelo
+limite de conta está documentado no ADR 0019; backoff/dispositivo validado continuam
+pendentes antes de exposição pública. Não considerar esse risco mitigado só pela documentação.
+
+Antes de uso público, completar convites, recuperação/troca de senha, verificação
+de email e demais controles de identidade/deploy descritos no ADR 0019. No M2,
+continuar pelo agendador/outbox/Redis Streams definido neste documento.
