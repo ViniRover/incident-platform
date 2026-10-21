@@ -14,6 +14,8 @@ Features com regras de negócio passam a ter `domain/`, `application/`,
 - Rotas validam/serializam HTTP e chamam casos de uso. A composição fica em providers
   com `Depends`; não usar `Depends` dentro das regras de negócio.
 - Recursos como pools são criados no lifespan e fechados no shutdown.
+- URLs de PostgreSQL e Redis são obrigatórias na configuração. Somente `.env.example`
+  e Compose fornecem credenciais locais; testes injetam configurações explícitas.
 - `platform/` contém apenas recursos técnicos compartilhados. Não virar uma pasta
   de serviços de negócio genéricos.
 - Uma feature acessa outra por contrato público/caso de uso, nunca pelo repositório

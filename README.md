@@ -28,6 +28,10 @@ development only. If you change the username, password, or database, also update
 must be URI-encoded. Changing environment variables does not update users in an
 already initialized PostgreSQL volume.
 
+The API and migrations require both `PULSE_DATABASE_URL` and `PULSE_REDIS_URL`.
+Missing settings fail validation before startup. Compose supplies both values;
+host-side commands load them explicitly from `.env`.
+
 - Frontend: http://localhost:8080
 - OpenAPI/Swagger: http://localhost:8000/docs
 - Liveness: http://localhost:8000/api/v1/health/live
@@ -111,7 +115,10 @@ Remove-Item Env:PULSE_INTEGRATION
 
 In Bash: `PULSE_INTEGRATION=1 uv run --env-file ../.env pytest -m integration -v`.
 The CI workflow creates a fresh database, reapplies `upgrade head`, verifies the schemas
-and extension, builds both images, and tests proxy communication and Redis failure/recovery.
+and extension, builds both images, and tests proxy communication, API recreation,
+Redis failure/recovery, and packet loss on an established PostgreSQL connection.
+The packet-loss check runs on Linux and installs a temporary firewall rule only in
+the test API container's network namespace, removing it when the step exits.
 
 ## Failure demonstration
 
@@ -166,3 +173,8 @@ These supporting documents are currently written in Portuguese.
   Prometheus, Grafana, and OpenTelemetry collection will be added in that milestone.
 - Scheduler and worker processes will be added as entrypoints in the same package
   when their respective milestones are implemented.
+- PostgreSQL connections use libpq TCP timeouts and keepalives in addition to
+  connection and statement timeouts. Socket option support depends on the OS.
+  These protect against lost TCP traffic; they are not an overall readiness deadline
+  or a timeout for a server that keeps acknowledging TCP while its process is stalled.
+  See [libpq connection parameters](https://www.postgresql.org/docs/current/libpq-connect.html#LIBPQ-PARAMKEYWORDS).

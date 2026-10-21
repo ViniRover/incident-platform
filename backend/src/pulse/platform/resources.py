@@ -17,7 +17,17 @@ class Resources:
             engine=create_engine(
                 settings.database_url.get_secret_value(),
                 pool_pre_ping=True,
-                connect_args={"connect_timeout": 2, "options": "-c statement_timeout=2000"},
+                connect_args={
+                    "connect_timeout": 2,
+                    "options": "-c statement_timeout=2000",
+                    # Bound unacknowledged traffic on existing pooled TCP connections.
+                    # libpq ignores unsupported socket options on other platforms.
+                    "tcp_user_timeout": 3000,
+                    "keepalives": 1,
+                    "keepalives_idle": 5,
+                    "keepalives_interval": 2,
+                    "keepalives_count": 2,
+                },
             ),
             redis=Redis.from_url(
                 settings.redis_url.get_secret_value(),

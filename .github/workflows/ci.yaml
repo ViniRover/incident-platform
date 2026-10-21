@@ -1,6 +1,7 @@
 name: CI
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
@@ -46,6 +47,9 @@ jobs:
 
   integration:
     runs-on: ubuntu-latest
+    env:
+      PULSE_DATABASE_URL: postgresql+psycopg://pulse:pulse_local_only@localhost:5432/pulse
+      PULSE_REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -62,6 +66,33 @@ jobs:
           PULSE_INTEGRATION: '1'
       - run: docker compose up -d --build --wait
       - run: curl --fail http://localhost:8080/ && curl --fail http://localhost:8080/api/v1/health/ready
+      - name: Pooled PostgreSQL connection under packet loss
+        shell: bash
+        run: |
+          curl --fail --max-time 6 http://localhost:8000/api/v1/health/ready
+          api_pid=$(docker inspect --format '{{.State.Pid}}' "$(docker compose ps -q api)")
+          postgres_ip=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$(docker compose ps -q postgres)")
+          # Only this test API's network namespace is affected, never the runner's network.
+          trap 'sudo nsenter -t "$api_pid" -n iptables -D OUTPUT -d "$postgres_ip" -p tcp --dport 5432 -j DROP' EXIT
+          sudo nsenter -t "$api_pid" -n iptables -I OUTPUT -d "$postgres_ip" -p tcp --dport 5432 -j DROP
+          test "$(curl --max-time 6 -sS -o /dev/null -w '%{http_code}' http://localhost:8000/api/v1/health/ready)" = 503
+          curl --fail --max-time 2 http://localhost:8000/api/v1/health/live
+      - name: Proxy survives API recreation
+        shell: bash
+        run: |
+          frontend_id=$(docker compose ps -q frontend)
+          api_id=$(docker compose ps -q api)
+          old_ip=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$api_id")
+          network=$(docker inspect --format '{{range $name, $config := .NetworkSettings.Networks}}{{$name}}{{end}}' "$api_id")
+          docker compose rm --stop --force api
+          # Reserve its former IP so the new API must get a different address.
+          reservation=$(docker run --rm -d --network "$network" --ip "$old_ip" --entrypoint python pulse-backend:local -c 'import time; time.sleep(120)')
+          trap 'docker rm -f "$reservation"' EXIT
+          docker compose up -d --no-deps --wait api
+          new_ip=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$(docker compose ps -q api)")
+          test "$new_ip" != "$old_ip"
+          test "$(docker compose ps -q frontend)" = "$frontend_id"
+          curl --fail --max-time 6 --retry 12 --retry-all-errors --retry-delay 1 http://localhost:8080/api/v1/health/ready
       - name: Dependency failure and recovery
         shell: bash
         run: |

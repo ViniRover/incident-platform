@@ -2,7 +2,37 @@
 
 Data: 21/10/2026. Ambiente: Windows, Node.js 24.18.0, Python 3.13.9, uv 0.12.20.
 
-## Resultado
+## Atualização após a revisão do PR #1
+
+As evidências abaixo complementam o registro inicial, preservado nas próximas seções.
+O Docker voltou a estar disponível; a limitação inicial não bloqueia mais os testes
+de containers. A consulta ao GitHub confirmou os três jobs verdes para `3685a71`
+([execução original](https://github.com/ViniRover/incident-platform/actions/runs/39593149212)).
+
+Após implementar os quatro ajustes solicitados na revisão:
+
+- 13 testes de backend sem dependências externas passaram; cobertura de 91,06%.
+- Ruff lint e formatação passaram (19 arquivos Python).
+- O teste integrado com PostgreSQL/TimescaleDB e Redis reais passou, usando URLs IPv4
+  explícitas no host Windows. A resolução de `localhost` não concluiu a primeira
+  tentativa local, que foi interrompida antes de repetir com `127.0.0.1`.
+- As duas imagens foram construídas e a stack isolada `pulse-pr1-review` ficou saudável.
+- Migrations foram aplicadas em volume novo e `upgrade head` executado novamente.
+- `nginx -t` passou e o proxy respondeu `200`.
+- A API foi recriada com IP diferente (`172.20.0.4` → `172.20.0.6`), sem reiniciar o
+  frontend; o proxy voltou a responder `200`.
+- Testes de configuração verificam falha antes do startup quando falta qualquer URL.
+- Um teste inspeciona os parâmetros entregues pelo SQLAlchemy ao driver libpq,
+  incluindo timeout TCP e keepalives, e cobre o retorno `false` após timeout do driver.
+
+O workflow agora executa push somente em `main` e eventos de pull request. Também
+inclui regressões Linux para perda real de pacotes em conexão PostgreSQL já aberta
+e recriação da API com mudança obrigatória de IP. A perda de pacotes usa uma regra
+temporária no namespace de rede da API e remove a regra ao sair do passo.
+Esses cenários precisam passar na nova execução de CI; os resultados originais
+não são evidência dos ajustes posteriores. A revisão visual continua pendente.
+
+## Resultado inicial (commit `3685a71`)
 
 Base do M0 implementada. A conclusão integral do marco depende de executar a stack
 Docker e os testes de integração reais; essa etapa está bloqueada pelo Docker

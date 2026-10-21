@@ -25,6 +25,13 @@ capacidades removidas. Imagens são identificadas por versão, dependências por
 `uv.lock` e `package-lock.json`. CI valida lint, testes, migration em banco novo,
 build das imagens e falha/recuperação de dependência.
 
+Após a revisão do PR #1, URLs de conexão passaram a ser obrigatórias na aplicação.
+Conexões PostgreSQL usam `tcp_user_timeout=3000` e keepalives para limitar falhas
+de tráfego TCP em conexões do pool. Esses controles dependem do sistema operacional
+e não constituem um prazo global do readiness nem limitam um servidor travado que
+continua confirmando pacotes TCP. Nginx resolve a API pelo DNS do Docker com validade
+de 10 segundos. O CI executa em pushes para `main` e eventos de pull request.
+
 ## Consequências positivas
 Ambientes reproduzíveis e um fluxo único de bootstrap. Readiness distingue falhas
 de dependências de falhas do processo. Serviços internos não são expostos por padrão.
@@ -38,6 +45,8 @@ As credenciais locais têm privilégios amplos e não servem para produção.
 Validar Compose, instalações congeladas, lint, testes e builds. O teste integrado
 verifica schemas `core`/`telemetry`, revisão Alembic e extensão TimescaleDB.
 O CI para Redis e espera readiness `503` mantendo liveness `200`, depois recupera.
+Também descarta pacotes PostgreSQL no namespace de rede da API de teste e recria
+a API com outro IP, mantendo o mesmo frontend, para verificar a resolução DNS.
 O registro de evidências executadas fica em `docs/M0_VALIDATION.md`.
 
 ## Quando reconsiderar
